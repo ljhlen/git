@@ -459,6 +459,7 @@ int for_each_reflog(each_ref_fn fn, void *cb_data);
  * repeated slashes are accepted.
  */
 int check_refname_format(const char *refname, int flags);
+void sanitize_worktree_refname(struct strbuf *name);
 
 const char *prettify_refname(const char *refname);
 

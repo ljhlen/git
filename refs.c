@@ -163,6 +163,42 @@ static int check_refname_component(const char *refname, int *flags)
 	return cp - refname;
 }
 
+void sanitize_worktree_refname(struct strbuf *name)
+{
+	int flags = 0, i, max_tries;
+	const char *cp;
+	enum refname_check_code ret;
+
+	/*
+	 * name->len should be enough because we should never need to
+	 * substitute any position more than once, but let's just add
+	 * a couple more to be on the safe side.
+	 */
+	max_tries = name->len + 10;
+	for (i = 0; i < max_tries; i++) {
+		ret = do_check_refname_component(name->buf, &flags, &cp);
+		switch (ret) {
+		case refname_ok:
+			strbuf_setlen(name, cp - name->buf);
+			return;
+
+		case refname_component_has_zero_length:
+			strbuf_addstr(name, "worktree");
+			return;
+
+		case refname_contains_dotdot:
+		case refname_contains_atopen:
+		case refname_has_badchar:
+		case refname_contains_wildcard:
+		case refname_ends_with_dotlock:
+		case refname_starts_with_dot:
+			*(char *)cp = '-';
+			break;
+		}
+	}
+	BUG("stuck in infinite loop! buf = %s", name->buf);
+}
+
 int check_refname_format(const char *refname, int flags)
 {
 	int component_len, component_count = 0;
