@@ -57,10 +57,21 @@ static unsigned char refname_disposition[256] = {
 	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 4, 4
 };
 
+enum refname_check_code {
+	 refname_ok = 0,
+	 refname_contains_dotdot,
+	 refname_contains_atopen,
+	 refname_has_badchar,
+	 refname_contains_wildcard,
+	 refname_starts_with_dot,
+	 refname_ends_with_dotlock,
+	 refname_component_has_zero_length
+};
+
 /*
  * Try to read one refname component from the front of refname.
- * Return the length of the component found, or -1 if the component is
- * not legal.  It is legal if it is something reasonable to have under
+ * If the component is legal, return the end of the component in cp_out.
+ * It is legal if it is something reasonable to have under
  * ".git/refs/"; We do not like it if:
  *
  * - any path component of it begins with ".", or
@@ -71,11 +82,15 @@ static unsigned char refname_disposition[256] = {
  * - it ends with a "/", or
  * - it ends with ".lock", or
  * - it contains a "@{" portion
+ *
+ * in which case cp_out points to the beginning of the illegal part.
  */
-static int check_refname_component(const char *refname, int *flags)
+static enum refname_check_code do_check_refname_component(
+	const char *refname, int *flags, const char **cp_out)
 {
 	const char *cp;
 	char last = '\0';
+	enum refname_check_code ret = refname_ok;
 
 	for (cp = refname; ; cp++) {
 		int ch = *cp & 255;
@@ -84,18 +99,28 @@ static int check_refname_component(const char *refname, int *flags)
 		case 1:
 			goto out;
 		case 2:
-			if (last == '.')
-				return -1; /* Refname contains "..". */
+			if (last == '.') {
+				cp--;
+				ret = refname_contains_dotdot;
+				goto done;
+			}
 			break;
 		case 3:
-			if (last == '@')
-				return -1; /* Refname contains "@{". */
+			if (last == '@') {
+				cp--;
+				ret = refname_contains_atopen; /* @{ */
+				goto done;
+			}
 			break;
 		case 4:
-			return -1;
+			ret = refname_has_badchar;
+			goto done;
 		case 5:
-			if (!(*flags & REFNAME_REFSPEC_PATTERN))
-				return -1; /* refspec can't be a pattern */
+			if (!(*flags & REFNAME_REFSPEC_PATTERN)) {
+				/* refspec can't be a pattern */
+				ret = refname_contains_wildcard;
+				goto done;
+			}
 
 			/*
 			 * Unset the pattern flag so that we only accept
@@ -107,13 +132,34 @@ static int check_refname_component(const char *refname, int *flags)
 		last = ch;
 	}
 out:
-	if (cp == refname)
-		return 0; /* Component has zero length. */
-	if (refname[0] == '.')
-		return -1; /* Component starts with '.'. */
+	if (cp == refname) {
+		ret = refname_component_has_zero_length;
+		goto done;
+	}
+	if (refname[0] == '.') {
+		cp = refname;
+		ret = refname_starts_with_dot;
+		goto done;
+	}
 	if (cp - refname >= LOCK_SUFFIX_LEN &&
-	    !memcmp(cp - LOCK_SUFFIX_LEN, LOCK_SUFFIX, LOCK_SUFFIX_LEN))
-		return -1; /* Refname ends with ".lock". */
+	    !memcmp(cp - LOCK_SUFFIX_LEN, LOCK_SUFFIX, LOCK_SUFFIX_LEN)) {
+		cp -= LOCK_SUFFIX_LEN;
+		ret = refname_ends_with_dotlock;
+	}
+done:
+	*cp_out = cp;
+	return ret;
+}
+
+/* Return the length of the component if it's legal otherwise -1 */
+static int check_refname_component(const char *refname, int *flags)
+{
+	const char *cp;
+	enum refname_check_code ret;
+
+	ret = do_check_refname_component(refname, flags, &cp);
+	if (ret)
+		return -1;
 	return cp - refname;
 }
 
