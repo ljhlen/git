@@ -16,7 +16,7 @@ module Git
           "<citerefentry>\n" \
             "<refentrytitle>#{target}</refentrytitle>" \
             "<manvolnum>#{attrs[1]}</manvolnum>\n" \
-          "</citerefentry>\n"
+          "</citerefentry>"
         end
       end
     end
